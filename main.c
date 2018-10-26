@@ -3699,7 +3699,6 @@ int mp4boxMain(int argc, char **argv)
 			interleaving_time = DEFAULT_INTERLEAVING_IN_SEC;
 		}
 	}
-
 	if (dump_std)
 		outName = "std";
 
@@ -3760,7 +3759,7 @@ int mp4boxMain(int argc, char **argv)
 #endif
 
 	if (gf_logs) {
-		//gf_log_set_tools_levels(gf_logs);
+		gf_log_set_tools_levels(gf_logs);
 	} else {
 		GF_LOG_Level level = verbose ? GF_LOG_DEBUG : GF_LOG_INFO;
 		gf_log_set_tool_level(GF_LOG_CONTAINER, level);
@@ -3982,7 +3981,7 @@ int mp4boxMain(int argc, char **argv)
 				char *src = argv[i+1];
 
 				e = import_file(file, src, import_flags, import_fps, agg_samples);
-printf("KK@mp4box#L3986-src:%s -import_flags:%d -import_fps:%d -agg_samples:%d\n",
+printf("KK@mp4box#L3986-src:%s -import_flags:%d -import_fps:%f -agg_samples:%d\n",
 	src,import_flags,import_fps, agg_samples);
 				if (e) {
 					while (src) {
@@ -4548,7 +4547,6 @@ printf("KK@mp4box#L3986-src:%s -import_flags:%d -import_fps:%d -agg_samples:%d\n
 	}
 	if (dump_cr) dump_isom_ismacryp(file, dump_std ? NULL : (outName ? outName : outfile), outName ? GF_TRUE : GF_FALSE);
 	if ((dump_ttxt || dump_srt) && trackID) {
-
 		if (trackID == (u32)-1) {
 
 			u32 j;
@@ -5325,9 +5323,9 @@ printf("KK@mp4box#L3986-src:%s -import_flags:%d -import_fps:%d -agg_samples:%d\n
 		e = gf_isom_make_interleave(file, interleaving_time);
 		if (!e && old_interleave) e = gf_isom_set_storage_mode(file, GF_ISOM_STORE_INTERLEAVED);
 	}
-	if (force_co64)
+	if (force_co64){
 		gf_isom_force_64bit_chunk_offset(file, GF_TRUE);
-
+	}
 	if (e) goto err_exit;
 
 #if !defined(GPAC_DISABLE_ISOM_HINTING) && !defined(GPAC_DISABLE_SENG)
@@ -5390,7 +5388,11 @@ printf("KK@mp4box#L3986-src:%s -import_flags:%d -import_fps:%d -agg_samples:%d\n
 		needSave = GF_TRUE;
 	}
 
-	if (!encode && !force_new) gf_isom_set_final_name(file, outfile);
+	if (!encode && !force_new)
+	{
+printf("K-BookMark0\n");
+		gf_isom_set_final_name(file, outfile);
+	}
 	if (needSave) {
 		if (outName) {
 			fprintf(stderr, "Saving to %s: ", outfile);

@@ -109,7 +109,12 @@ extern u32 swf_flags;
 extern Float swf_flatten_angle;
 extern Bool keep_sys_tracks;
 
-void scene_coding_log(void *cbk, GF_LOG_Level log_level, GF_LOG_Tool log_tool, const char *fmt, va_list vlist);
+void scene_coding_log(void *cbk, GF_LOG_Level log_level, GF_LOG_Tool log_tool, const char *fmt, va_list vlist){
+	FILE *logs = cbk;
+	if(log_tool != GF_LOG_CODING) return;
+	vfprintf(logs, fmt, vlist);
+	fflush(logs);
+}
 
 void convert_file_info(char *inName, u32 trackID)
 {

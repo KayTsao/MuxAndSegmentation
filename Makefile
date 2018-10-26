@@ -13,7 +13,7 @@ LINKFLAGS += -lgpac
 
 PROG = TEST#MP4Box
 
-OBJS = MP4Box.o filedump.o fileimport.o live.o	#main.o 
+OBJS = main2.o fileimport.o live.o	#main.o filedump.o 
 SRCS := $(OBJS:.o=.c) 
 
 all: $(PROG) clean_obj
