@@ -852,9 +852,266 @@ void init_libgpac(Bool show_logs){
 	gf_log_set_tool_level(GF_LOG_ALL, GF_LOG_DEBUG);
     }
 }
+static u32 run_for=0;
+static Bool no_cache = GF_FALSE;
+static Bool split_on_closest=GF_FALSE;
+static Bool split_on_bound=GF_FALSE;
+static Bool no_loop=GF_FALSE;
+
+int dashify(int nb_srcs, char **srcs, char *output, double duration){
+	//-dash 1000
+	dash_duration = duration / 1000;
+	if(dash_duration <= 0.0){
+		printf("Error: invalid dash duration %f\n", dash_duration);
+		return 1;
+	}
+	//-rap -frag-rap
+	hint_flags |= GP_RTP_PCK_SIGNAL_RAP;
+	seg_at_rap = GF_TRUE;//1;
+	frag_at_rap = GF_TRUE;//1;
+	inName = srcs[0];
+	//-profile live
+	dash_profile = GF_DASH_PROFILE_LIVE;
+	//-out
+	outName = output;
+
+
+	for(int i = 0; i < nb_srcs; i++){
+		char *input_file = srcs[i];
+		dash_inputs = set_dash_input(dash_inputs, input_file, &nb_dash_inputs);
+	}
+	if (!interleaving_time) {
+		printf("KK bookmark0, interleaving_time = %f\n", interleaving_time);
+		/*by default use single fragment per dash segment*/
+		if (dash_duration)
+			interleaving_time = dash_duration;
+		else if (!do_flat) {
+			interleaving_time = DEFAULT_INTERLEAVING_IN_SEC;
+		}
+		printf("KK bookmark0, interleaving_time = %f\n", interleaving_time);
+	}
+	if(dash_duration && !nb_dash_inputs){
+		dash_inputs = set_dash_input(dash_inputs, inName, &nb_dash_inputs);
+	}
+	if (dash_duration) {
+		Bool del_file = GF_FALSE;
+		char szMPD[GF_MAX_PATH], *sep;
+		GF_Config *dash_ctx = NULL;
+		u32 do_abort = 0;
+		GF_DASHSegmenter *dasher;
+
+		if (crypt) {
+			fprintf(stderr, "MP4Box cannot crypt and DASH on the same pass. Please encrypt your content first.\n");
+			return mp4box_cleanup(1);
+		}
+
+		strcpy(outfile, outName ? outName : gf_url_get_resource_name(inName) );
+		sep = strrchr(outfile, '.');
+		if (sep) sep[0] = 0;
+		if (!outName) strcat(outfile, "_dash");
+		strcpy(szMPD, outfile);
+		strcat(szMPD, ".mpd");
+
+		if ((dash_subduration>0) && (dash_duration > dash_subduration)) {
+			fprintf(stderr, "Warning: -subdur parameter (%g s) should be greater than segment duration (%g s), using segment duration instead\n", dash_subduration, dash_duration);
+			dash_subduration = dash_duration;
+		}
+
+		if (dash_mode && dash_live)
+			fprintf(stderr, "Live DASH-ing - press 'q' to quit, 's' to save context and quit\n");
+
+		if (!dash_ctx_file && dash_live) {
+			dash_ctx = gf_cfg_new(NULL, NULL);
+		} else if (dash_ctx_file) {
+			if (force_new)
+				gf_delete_file(dash_ctx_file);
+
+			dash_ctx = gf_cfg_force_new(NULL, dash_ctx_file);
+		}
+
+		if (dash_profile==GF_DASH_PROFILE_UNKNOWN)
+			dash_profile = dash_mode ? GF_DASH_PROFILE_LIVE : GF_DASH_PROFILE_FULL;
+
+		if (!dash_mode) {
+			time_shift_depth = 0;
+			mpd_update_time = 0;
+		} else if ((dash_profile>=GF_DASH_PROFILE_MAIN) && !use_url_template && !mpd_update_time) {
+			/*use a default MPD update of dash_duration sec*/
+			mpd_update_time = (Double) (dash_subduration ? dash_subduration : dash_duration);
+			fprintf(stderr, "Using default MPD refresh of %g seconds\n", mpd_update_time);
+		}
+
+		if (file && needSave) {
+			gf_isom_close(file);
+			file = NULL;
+			del_file = GF_TRUE;
+		}
+
+		/*setup dash*/
+		dasher = gf_dasher_new(szMPD, dash_profile, tmpdir, dash_scale, dash_ctx);
+		if (!dasher) {
+			return mp4box_cleanup(1);
+			return GF_OUT_OF_MEM;
+		}
+		e = gf_dasher_set_info(dasher, dash_title, cprt, dash_more_info, dash_source);
+		if (e) {
+			fprintf(stderr, "DASH Error: %s\n", gf_error_to_string(e));
+			return mp4box_cleanup(1);
+		}
+		if (dash_start_date) gf_dasher_set_start_date(dasher, dash_start_date);
+
+
+		//e = gf_dasher_set_location(dasher, mpd_source);
+		for (i=0; i < nb_mpd_base_urls; i++) {
+			e = gf_dasher_add_base_url(dasher, mpd_base_urls[i]);
+			if (e) {
+				fprintf(stderr, "DASH Error: %s\n", gf_error_to_string(e));
+				return mp4box_cleanup(1);
+			}
+		}
+
+		if (segment_timeline && !use_url_template) {
+			fprintf(stderr, "DASH Warning: using -segment-timeline with no -url-template. Forcing URL template.\n");
+			use_url_template = GF_TRUE;
+		}
+
+		e = gf_dasher_enable_url_template(dasher, (Bool) use_url_template, seg_name, seg_ext);
+		if (!e) e = gf_dasher_enable_segment_timeline(dasher, segment_timeline);
+		if (!e) e = gf_dasher_enable_single_segment(dasher, single_segment);
+		if (!e) e = gf_dasher_enable_single_file(dasher, single_file);
+		if (!e) e = gf_dasher_set_switch_mode(dasher, bitstream_switching_mode);
+		if (!e) e = gf_dasher_set_durations(dasher, dash_duration, interleaving_time);
+		if (!e) e = gf_dasher_enable_rap_splitting(dasher, seg_at_rap, frag_at_rap);
+		if (!e) e = gf_dasher_set_segment_marker(dasher, segment_marker);
+		if (!e) e = gf_dasher_enable_sidx(dasher, (subsegs_per_sidx>=0) ? 1 : 0, (u32) subsegs_per_sidx, daisy_chain_sidx);
+		if (!e) e = gf_dasher_set_dynamic_mode(dasher, dash_mode, mpd_update_time, time_shift_depth, mpd_live_duration);
+		if (!e) e = gf_dasher_set_min_buffer(dasher, min_buffer);
+		if (!e) e = gf_dasher_set_ast_offset(dasher, ast_offset_ms);
+		if (!e) e = gf_dasher_enable_memory_fragmenting(dasher, memory_frags);
+		if (!e) e = gf_dasher_set_initial_isobmf(dasher, initial_moof_sn, initial_tfdt);
+		if (!e) e = gf_dasher_configure_isobmf_default(dasher, no_fragments_defaults, pssh_mode, samplegroups_in_traf, single_traf_per_moof, tfdt_per_traf);
+		if (!e) e = gf_dasher_enable_utc_ref(dasher, insert_utc);
+		if (!e) e = gf_dasher_enable_real_time(dasher, frag_real_time);
+		if (!e) e = gf_dasher_set_content_protection_location_mode(dasher, cp_location_mode);
+		if (!e) e = gf_dasher_set_profile_extension(dasher, dash_profile_extension);
+		if (!e) e = gf_dasher_enable_cached_inputs(dasher, no_cache);
+		if (!e) e = gf_dasher_set_test_mode(dasher,force_test_mode);
+		if (!e) e = gf_dasher_enable_loop_inputs(dasher, ! no_loop);
+		if (!e) e = gf_dasher_set_split_on_bound(dasher, split_on_bound);
+		if (!e) e = gf_dasher_set_split_on_closest(dasher, split_on_closest);
+		if (!e && dash_cues) e = gf_dasher_set_cues(dasher, dash_cues, strict_cues);
+
+		for (i=0; i < nb_dash_inputs; i++) {
+			if (!e) e = gf_dasher_add_input(dasher, &dash_inputs[i]);
+		}
+		if (e) {
+			fprintf(stderr, "DASH Setup Error: %s\n", gf_error_to_string(e));
+			return mp4box_cleanup(1);
+		}
+
+		dash_cumulated_time=0;
+
+		while (1) {
+			if (run_for && (dash_cumulated_time > run_for))
+				do_abort = 3;
+
+			dash_prev_time=gf_sys_clock();
+			if (do_abort>=2) {
+				e = gf_dasher_set_dynamic_mode(dasher, GF_DASH_DYNAMIC_LAST, 0, time_shift_depth, mpd_live_duration);
+			}
+
+			if (!e) e = gf_dasher_process(dasher, dash_subduration);
+
+			if (do_abort)
+				break;
+
+			//this happens when reading file while writing them (local playback of the live session ...)
+			if (dash_live && (e==GF_IO_ERR) ) {
+				fprintf(stderr, "Error dashing file (%s) but continuing ...\n", gf_error_to_string(e) );
+				e = GF_OK;
+			}
+
+			if (e) break;
+
+			if (dash_live) {
+				u64 ms_in_session=0;
+				u32 slept = gf_sys_clock();
+				u32 sleep_for = gf_dasher_next_update_time(dasher, &ms_in_session);
+				fprintf(stderr, "Next generation scheduled in %u ms (DASH time "LLU" ms)\n", sleep_for, ms_in_session);
+				while (1) {
+					if (gf_prompt_has_input()) {
+						char c = (char) gf_prompt_get_char();
+						if (c=='X') {
+							do_abort = 1;
+							break;
+						}
+						if (c=='q') {
+							do_abort = 2;
+							break;
+						}
+						if (c=='s') {
+							do_abort = 3;
+							break;
+						}
+					}
+
+					if (dash_mode == GF_DASH_DYNAMIC_DEBUG) {
+						break;
+					}
+					if (!sleep_for) break;
+
+					gf_sleep(1);
+					sleep_for = gf_dasher_next_update_time(dasher, NULL);
+					if (sleep_for<1) {
+						dash_now_time=gf_sys_clock();
+						fprintf(stderr, "Slept for %d ms before generation\n", dash_now_time - slept);
+						dash_cumulated_time+=(dash_now_time-dash_prev_time);
+						break;
+					}
+				}
+			} else {
+				break;
+			}
+		}
+
+		gf_dasher_del(dasher);
+
+		if (dash_ctx) {
+			if (do_abort==3) {
+				if (!dash_ctx_file) {
+					char szName[1024];
+					fprintf(stderr, "Enter file name to save dash context:\n");
+					if (scanf("%s", szName) == 1) {
+						gf_cfg_set_filename(dash_ctx, szName);
+						gf_cfg_save(dash_ctx);
+					}
+				}
+			}
+			gf_cfg_del(dash_ctx);
+		}
+		if (e) fprintf(stderr, "Error DASHing file: %s\n", gf_error_to_string(e));
+		if (file) gf_isom_delete(file);
+		if (del_file)
+			gf_delete_file(inName);
+
+		if (e) return mp4box_cleanup(1);
+		goto exit;
+	}
+
+exit:
+	mp4box_cleanup(0);
+#ifdef GPAC_MEMORY_TRACKING
+	if (mem_track && (gf_memory_size() || gf_file_handles_count() )) {
+		gf_log_set_tool_level(GF_LOG_MEMORY, GF_LOG_INFO);
+		gf_memory_print();
+		return 2;
+	}
+#endif
+	return 0;
+}
 
 int bs2mp4(char* src, char *output, Double import_fps)
-{
+{	
 	nb_add = 0;
 	e = GF_OK;
 	import_fps = 0;
@@ -1054,8 +1311,16 @@ int main(int argc, char** argv)
     char * outname = "videos/output/HR1.mp4";
     char *src = "videos/input/HR1.hvc:split_tiles";//"videos/bs.hevc";  //对应输入码流文件路径
     init_libgpac(show_logs);
+char**srcs[3];
+srcs[0] = "videos/input/HR1.mp4";
+srcs[1] = "videos/input/HR2.mp4";
+srcs[2] = "videos/input/HR3.mp4";
+char* output = "videos/output/dashified2/test.mpd";
 start = gf_sys_clock();
-    bs2mp4(src, outname, fps);
+
+    dashify(3, srcs, output, 1000.0);
+//int dashify(int nb_srcs, char **srcs, char *output, double duration){
+//    bs2mp4(src, outname, fps);
 end = gf_sys_clock();
 dur = end-start;
 printf("bs2mp4 cost:%u ms\n", dur);
