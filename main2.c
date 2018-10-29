@@ -1308,22 +1308,29 @@ int main(int argc, char** argv)
     u32 start, end, dur;
     Bool show_logs = GF_FALSE;
     Double fps = 30.0000;
+    
+    init_libgpac(show_logs);
+//Packaging    
     char * outname = "videos/output/HR1.mp4";
     char *src = "videos/input/HR1.hvc:split_tiles";//"videos/bs.hevc";  //对应输入码流文件路径
-    init_libgpac(show_logs);
-char**srcs[3];
-srcs[0] = "videos/input/HR1.mp4";
-srcs[1] = "videos/input/HR2.mp4";
-srcs[2] = "videos/input/HR3.mp4";
-char* output = "videos/output/dashified2/test.mpd";
 start = gf_sys_clock();
-
-    dashify(3, srcs, output, 1000.0);
-//int dashify(int nb_srcs, char **srcs, char *output, double duration){
-//    bs2mp4(src, outname, fps);
+    bs2mp4(src, outname, fps);
 end = gf_sys_clock();
 dur = end-start;
 printf("bs2mp4 cost:%u ms\n", dur);
+//Dashing
+    char* output = "videos/output/dashified2/test.mpd";
+    char**srcs[5];
+    srcs[0] = "videos/input/LR.mp4";
+    srcs[0] = "videos/input/HR1.mp4";
+    srcs[1] = "videos/input/HR2.mp4";
+    srcs[2] = "videos/input/HR3.mp4";
+    srcs[0] = "videos/input/blk.mp4";
+start = gf_sys_clock();
+    dashify(5, srcs, output, 1000.0);
+end = gf_sys_clock();
+dur = end-start;
+printf("dashify cost:%u ms\n", dur);
     return 0;
 }
 
