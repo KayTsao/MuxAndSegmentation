@@ -853,7 +853,7 @@ void init_libgpac(Bool show_logs){
     }
 }
 
-int bs2mp4(Double import_fps)
+int bs2mp4(char* src, char *output, Double import_fps)
 {
 	nb_add = 0;
 	e = GF_OK;
@@ -863,13 +863,11 @@ int bs2mp4(Double import_fps)
 	do_flat = GF_FALSE;
 	inName = outName = mediaSource = input_ctx = output_ctx = \
 	drm_file = avi2raw = cprt = chap_file = pack_file = raw_cat = NULL;
-
 //设置参数
 	nb_add = 1; 		//对应 ‘-add’ 个数
-	//import_fps = 30.000000; //对应'-fps'后面的输入参数
 	force_new = GF_TRUE; 	//对应'-new'参数
-	inName = "output.mp4";
-	char *src = "videos/bs.hevc";  //对应输入码流文件路径
+	inName = output;
+	
 	import_flags = 0;
 	agg_samples = 0; //'-agg'参数
 
@@ -1053,9 +1051,11 @@ int main(int argc, char** argv)
     u32 start, end, dur;
     Bool show_logs = GF_FALSE;
     Double fps = 30.0000;
+    char * outname = "videos/output/HR1.mp4";
+    char *src = "videos/input/HR1.hvc:split_tiles";//"videos/bs.hevc";  //对应输入码流文件路径
     init_libgpac(show_logs);
 start = gf_sys_clock();
-    bs2mp4(fps);
+    bs2mp4(src, outname, fps);
 end = gf_sys_clock();
 dur = end-start;
 printf("bs2mp4 cost:%u ms\n", dur);
